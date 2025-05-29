@@ -1,24 +1,46 @@
 const fs = require('fs');
 const path = require('path');
 
-const HISTORICO_PATH = path.resolve('historicos/geral.jsonl');
+// Caminho correto, relativo à raiz do projeto (index.js está na raiz)
+const CAMINHO_MEMORIA = path.resolve(__dirname, '../historicos/memoria.jsonl');
+const CAMINHO_RECENTE = path.resolve(__dirname, '../historicos/memoria-curto-prazo.jsonl');
 
-function carregarHistorico(limit = 5) {
-  if (!fs.existsSync(HISTORICO_PATH)) return [];
+const LIMITE_RECENTE = 10;
 
-  const linhas = fs.readFileSync(HISTORICO_PATH, 'utf8')
+function adicionarÀMemoriaLongoPrazo(mensagem) {
+  const linha = JSON.stringify(mensagem) + '\n';
+  fs.appendFileSync(CAMINHO_MEMORIA, linha);
+}
+
+function adicionarAoHistoricoRecente(mensagem) {
+  let historico = [];
+
+  if (fs.existsSync(CAMINHO_RECENTE)) {
+    historico = fs.readFileSync(CAMINHO_RECENTE, 'utf-8')
+      .split('\n')
+      .filter(l => l.trim())
+      .map(JSON.parse);
+  }
+
+  historico.push(mensagem);
+
+  if (historico.length > LIMITE_RECENTE) {
+    historico = historico.slice(-LIMITE_RECENTE);
+  }
+
+  fs.writeFileSync(CAMINHO_RECENTE, historico.map(m => JSON.stringify(m)).join('\n') + '\n');
+}
+
+function carregarHistoricoRecente() {
+  if (!fs.existsSync(CAMINHO_RECENTE)) return [];
+  return fs.readFileSync(CAMINHO_RECENTE, 'utf-8')
     .split('\n')
     .filter(l => l.trim())
     .map(JSON.parse);
-
-  return linhas.slice(-limit);
-}
-
-function salvarNoHistorico(mensagem) {
-  fs.appendFileSync(HISTORICO_PATH, JSON.stringify(mensagem) + '\n');
 }
 
 module.exports = {
-  carregarHistorico,
-  salvarNoHistorico
+  adicionarÀMemoriaLongoPrazo,
+  adicionarAoHistoricoRecente,
+  carregarHistoricoRecente
 };
