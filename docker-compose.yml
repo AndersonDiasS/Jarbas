@@ -1,0 +1,46 @@
+services:
+  jarbas-app:
+    build: .
+    container_name: jarbas
+    volumes:
+      - ./memoria:/memoria 
+      - ./:/app
+    ports:
+      - "11436:11434"   # Mapeei a porta do host para 11436 para evitar conflito
+    depends_on:
+      - ollama
+      - mqtt
+    environment:
+      - OLLAMA_URL=http://ollama:11434
+    networks:
+      - jarbas-net
+
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11437:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - jarbas-net
+
+  mqtt:
+    image: eclipse-mosquitto
+    container_name: mqtt-broker
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    networks:
+      - jarbas-net
+
+networks:
+  jarbas-net:
+    driver: bridge
+
+volumes:
+  ollama_data:

@@ -1,6 +1,6 @@
 {
   "name": "jarbas",
-  "version": "1.0.0", 
+  "version": "0.0.5", 
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
@@ -19,6 +19,7 @@
   "homepage": "https://github.com/AndersonDiasS/Jarbas#readme",
   "description": "",
   "dependencies": {
+    "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",
     "fs": "^0.0.1-security",
     "node-fetch": "^2.7.0",

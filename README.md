@@ -10,11 +10,11 @@
 
 [x] Personalidade fixa (ex: jarbas_personalidade.json)
 
-[ ] Comandos básicos: !lembrar, !resumir, !limpar
+[x] Comandos básicos: !lembrar, !resumir, !limpar
 
-[ ] Salvar histórico com ID e data para recuperar depois
+[x] Salvar histórico com ID e data para recuperar depois
 
-[ ] Limitar a carga de contexto por conversa (~20–40 prompts)
+[x] Limitar a carga de contexto por conversa (~20–40 prompts)
 
 
 
