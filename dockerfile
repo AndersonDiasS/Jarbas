@@ -14,4 +14,4 @@ RUN npm install
 EXPOSE 3000
 
 # Inicia o Jarbas (ajuste se for outro arquivo principal)
-CMD ["node", "index.js"]
+CMD ["npm", "run", "jarbas"]
