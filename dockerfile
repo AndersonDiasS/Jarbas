@@ -1,17 +1,20 @@
-# Dockerfile
+# Usa imagem Node 20
 FROM node:20
 
-# Cria diretório de trabalho
+# Define diretório de trabalho
 WORKDIR /app
 
-# Copia arquivos do Jarbas
-COPY . .
+# Copia só o package.json e package-lock.json primeiro
+COPY package*.json ./
 
-# Instala dependências
+# Instala dependências com cache
 RUN npm install
 
-# Expõe a porta (se for servir API futuramente)
+# Agora copia o restante do projeto
+COPY . .
+
+# Expõe a porta (pode ajustar se necessário)
 EXPOSE 3000
 
-# Inicia o Jarbas (ajuste se for outro arquivo principal)
+# Comando padrão para iniciar o Jarbas
 CMD ["npm", "run", "jarbas"]
