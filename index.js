@@ -1,5 +1,6 @@
 const readline = require('readline');
 const fetch = require('node-fetch');
+
 const {
   verificarMudancaDeModo,
   getContextoAtual,
@@ -14,9 +15,14 @@ const {
   lerAnotacao
 } = require('./utils/arquivo');
 
-const { salvarMemoria, carregarMemoria, memoria, listarMemoria, limparMemoria } = require('./utils/memoria');
+const {
+  salvarMemoria,
+  carregarMemoria,
+  memoria,
+  listarMemoria,
+  limparMemoria
+} = require('./utils/memoria');
 
-// 🚀 NOVO: Importações para histórico separado
 const {
   adicionarÀMemoriaLongoPrazo,
   adicionarAoHistoricoRecente,
@@ -24,7 +30,7 @@ const {
 } = require('./utils/historico');
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
- 
+
 console.log(`🎩 Iniciando Jarbas...`);
 console.log(`🤖 Jarbas pronto com a personalidade "${getNomeAtual()}"`);
 
@@ -36,11 +42,55 @@ const rl = readline.createInterface({
 
 rl.prompt();
 
+// 🧠 Função para interpretar comandos naturais como "anote", "delete", etc.
+async function interpretarComandoNatural(input) {
+  const texto = input.toLowerCase();
+
+  if (texto.includes('anote') || texto.includes('crie uma nota') || texto.includes('criar nota')) {
+    await criarAnotacao(input);
+    console.log('📝 Anotação criada com sucesso!');
+    return true;
+  }
+
+  if (texto.includes('delete') || texto.includes('remova') || texto.includes('exclua')) {
+    const ok = await removerAnotacao(input);
+    console.log(ok ? '🗑️ Nota removida com sucesso!' : '⚠️ Nenhuma nota correspondente encontrada.');
+    return true;
+  }
+
+  if (texto.includes('mostrar notas') || texto.includes('anotações') || texto.includes('listar notas')) {
+    const notas = await listarAnotacoes();
+    if (notas.length === 0) {
+      console.log('📭 Nenhuma anotação encontrada.');
+    } else {
+      console.log('🗂️ Anotações:');
+      notas.forEach((n, i) => console.log(` ${i + 1}. ${n}`));
+    }
+    return true;
+  }
+
+  if (texto.includes('ler nota') || texto.includes('leia a nota') || texto.includes('mostre a nota')) {
+    const conteudo = await lerAnotacao(input);
+    if (conteudo) {
+      console.log('📄 Conteúdo da nota:\n', conteudo);
+    } else {
+      console.log('⚠️ Nenhuma nota correspondente encontrada.');
+    }
+    return true;
+  }
+
+  return false;
+}
+
 rl.on('line', async (input) => {
   input = input.trim();
   if (!input) return rl.prompt();
 
-  // Comandos Memoria
+  // Verifica comandos naturais (como "crie uma nota", etc)
+  const foiComandoNatural = await interpretarComandoNatural(input);
+  if (foiComandoNatural) return rl.prompt();
+
+  // Comandos de memória
   if (input === '!memoria') {
     const memoriaList = listarMemoria();
     if (memoriaList.length === 0) {
@@ -66,52 +116,7 @@ rl.on('line', async (input) => {
     return rl.prompt();
   }
 
-  // Criação Remoção ou edição de arquivos 
-  
-async function interpretarComandoNatural(input) {
-  const texto = input.toLowerCase();
-
-    if (texto.includes('anote') || texto.includes('crie uma nota') || texto.includes('criar nota')) {
-      await criarAnotacao(input);
-      console.log('📝 Anotação criada com sucesso!');
-      return true;
-    }
-
-    if (texto.includes('delete') || texto.includes('remova') || texto.includes('exclua')) {
-      const ok = await removerAnotacao(input);
-      console.log(ok ? '🗑️ Nota removida com sucesso!' : '⚠️ Nenhuma nota correspondente encontrada.');
-      return true;
-    }
-
-    if (texto.includes('mostrar notas') || texto.includes('anotações') || texto.includes('listar notas')) {
-      const notas = await listarAnotacoes();
-      if (notas.length === 0) {
-        console.log('📭 Nenhuma anotação encontrada.');
-      } else {
-        console.log('🗂️ Anotações:');
-        notas.forEach((n, i) => console.log(` ${i + 1}. ${n}`));
-      }
-      return true;
-    }
-
-    if (texto.includes('ler nota') || texto.includes('leia a nota') || texto.includes('mostre a nota')) {
-      const conteudo = await lerAnotacao(input);
-      if (conteudo) {
-        console.log('📄 Conteúdo da nota:\n', conteudo);
-      } else {
-        console.log('⚠️ Nenhuma nota correspondente encontrada.');
-      }
-      return true;
-    }
-
-    return false;
-  }
-
-
-
-
-  // Comandos de Personalidade
-
+  // Comandos de personalidade
   if (input === '!personalidades') {
     const modos = listarPersonalidades();
     console.log('🎭 Personalidades disponíveis:', modos.join(', '));
@@ -123,11 +128,10 @@ async function interpretarComandoNatural(input) {
     return rl.prompt();
   }
 
-  // Verifica se o usuário quer mudar de personalidade
+  // Verifica mudança de modo
   verificarMudancaDeModo(input);
   carregarMemoria();
 
-  // 🧠 NOVO: usa apenas o histórico recente
   const historicoRecentes = carregarHistoricoRecente();
 
   const mensagens = [
@@ -153,7 +157,6 @@ async function interpretarComandoNatural(input) {
     if (resposta) {
       console.log(`🤖 Jarbas: ${resposta}`);
 
-      // 💾 Salva em ambos os históricos
       const entrada = { role: 'user', content: input };
       const saida = { role: 'assistant', content: resposta };
 
