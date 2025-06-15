@@ -1,17 +1,16 @@
 services:
   jarbas-app:
     build: .
-    container_name: jarbas
+    container_name: jarbas-app
+    environment:
+      - OLLAMA_URL=http://ollama:11434
     volumes:
       - ./memoria:/app/memoria
-      # Removido o - ./:/app que causava erro
     ports:
-      - "11436:11434"
+      - "3000:3000"
     depends_on:
       - ollama
       - mqtt
-    environment:
-      - OLLAMA_URL=http://ollama:11434
     networks:
       - jarbas-net
 
@@ -19,7 +18,7 @@ services:
     image: ollama/ollama
     container_name: ollama
     ports:
-      - "11437:11434"
+      - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
     networks:

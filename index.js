@@ -1,179 +1,82 @@
-const readline = require('readline');
+const express = require('express');
 const fetch = require('node-fetch');
+const cors = require('cors');
+const bodyParser = require('body-parser');
 
 const {
   verificarMudancaDeModo,
   getContextoAtual,
   getNomeAtual,
-  listarPersonalidades
 } = require('./utils/personalidade');
-
-const {
-  criarAnotacao,
-  removerAnotacao,
-  listarAnotacoes,
-  lerAnotacao
-} = require('./utils/arquivo');
 
 const {
   salvarMemoria,
   carregarMemoria,
   memoria,
-  listarMemoria,
-  limparMemoria
 } = require('./utils/memoria');
 
 const {
   adicionarÀMemoriaLongoPrazo,
   adicionarAoHistoricoRecente,
-  carregarHistoricoRecente
+  carregarHistoricoRecente,
 } = require('./utils/historico');
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
 
+const app = express();
+app.use(cors());
+app.use(bodyParser.json());
+
 console.log(`🎩 Iniciando Jarbas...`);
 console.log(`🤖 Jarbas pronto com a personalidade "${getNomeAtual()}"`);
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-  prompt: '> '
-});
-
-rl.prompt();
-
-// 🧠 Função para interpretar comandos naturais como "anote", "delete", etc.
-async function interpretarComandoNatural(input) {
-  const texto = input.toLowerCase();
-
-  if (texto.includes('anote') || texto.includes('crie uma nota') || texto.includes('criar nota')) {
-    await criarAnotacao(input);
-    console.log('📝 Anotação criada com sucesso!');
-    return true;
-  }
-
-  if (texto.includes('delete') || texto.includes('remova') || texto.includes('exclua')) {
-    const ok = await removerAnotacao(input);
-    console.log(ok ? '🗑️ Nota removida com sucesso!' : '⚠️ Nenhuma nota correspondente encontrada.');
-    return true;
-  }
-
-  if (texto.includes('mostrar notas') || texto.includes('anotações') || texto.includes('listar notas')) {
-    const notas = await listarAnotacoes();
-    if (notas.length === 0) {
-      console.log('📭 Nenhuma anotação encontrada.');
-    } else {
-      console.log('🗂️ Anotações:');
-      notas.forEach((n, i) => console.log(` ${i + 1}. ${n}`));
-    }
-    return true;
-  }
-
-  if (texto.includes('ler nota') || texto.includes('leia a nota') || texto.includes('mostre a nota')) {
-    const conteudo = await lerAnotacao(input);
-    if (conteudo) {
-      console.log('📄 Conteúdo da nota:\n', conteudo);
-    } else {
-      console.log('⚠️ Nenhuma nota correspondente encontrada.');
-    }
-    return true;
-  }
-
-  return false;
-}
-
-rl.on('line', async (input) => {
-  input = input.trim();
-  if (!input) return rl.prompt();
-
-  // Verifica comandos naturais (como "crie uma nota", etc)
-  const foiComandoNatural = await interpretarComandoNatural(input);
-  if (foiComandoNatural) return rl.prompt();
-
-  // Comandos de memória
-  if (input === '!memoria') {
-    const memoriaList = listarMemoria();
-    if (memoriaList.length === 0) {
-      console.log('💾 Memória vazia.');
-    } else {
-      console.log('💾 Memória atual:');
-      memoriaList.forEach((item, index) => {
-        console.log(`${index + 1}: ${item.pergunta} -> ${item.resposta}`);
-      });
-    }
-    return rl.prompt();
-  }
-
-  if (input === '!salvar') {
-    salvarMemoria();
-    console.log('💾 Memória salva com sucesso!');
-    return rl.prompt();
-  }
-
-  if (input === '!limpar') {
-    limparMemoria();
-    console.log('🗑️ Memória limpa com sucesso!');
-    return rl.prompt();
-  }
-
-  // Comandos de personalidade
-  if (input === '!personalidades') {
-    const modos = listarPersonalidades();
-    console.log('🎭 Personalidades disponíveis:', modos.join(', '));
-    return rl.prompt();
-  }
-
-  if (input === '!modoatual') {
-    console.log(`🧠 Modo atual: ${getNomeAtual()}`);
-    return rl.prompt();
-  }
-
-  // Verifica mudança de modo
-  verificarMudancaDeModo(input);
-  carregarMemoria();
-
-  const historicoRecentes = carregarHistoricoRecente();
-
-  const mensagens = [
-    ...getContextoAtual(),
-    ...historicoRecentes,
-    { role: 'user', content: input }
-  ];
-
+app.post('/chat', async (req, res) => {
   try {
+    const input = req.body.message?.trim();
+    if (!input) return res.status(400).json({ error: 'Mensagem vazia' });
+
+    // Verifica mudança de modo e carrega memória
+    verificarMudancaDeModo(input);
+    carregarMemoria();
+
+    // Monta contexto + histórico
+    const historicoRecentes = carregarHistoricoRecente();
+    const mensagens = [...getContextoAtual(), ...historicoRecentes, { role: 'user', content: input }];
+
+    // Chama API Ollama
     const response = await fetch(`${OLLAMA_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'llama3',
         messages: mensagens,
-        stream: false
-      })
+        stream: false,
+      }),
     });
 
     const data = await response.json();
     const resposta = data.message?.content?.trim();
 
     if (resposta) {
-      console.log(`🤖 Jarbas: ${resposta}`);
-
-      const entrada = { role: 'user', content: input };
-      const saida = { role: 'assistant', content: resposta };
-
-      adicionarAoHistoricoRecente(entrada);
-      adicionarAoHistoricoRecente(saida);
-      adicionarÀMemoriaLongoPrazo(entrada);
-      adicionarÀMemoriaLongoPrazo(saida);
-
+      // Salva histórico e memória
+      adicionarAoHistoricoRecente({ role: 'user', content: input });
+      adicionarAoHistoricoRecente({ role: 'assistant', content: resposta });
+      adicionarÀMemoriaLongoPrazo({ role: 'user', content: input });
+      adicionarÀMemoriaLongoPrazo({ role: 'assistant', content: resposta });
       memoria.push({ tipo: 'mensagem', pergunta: input, resposta });
       salvarMemoria();
-    } else {
-      console.log('🤖 Jarbas: (sem resposta)');
-    }
 
+      res.json({ reply: resposta });
+    } else {
+      res.json({ reply: '(sem resposta)' });
+    }
   } catch (error) {
     console.error('❌ Erro ao falar com o Jarbas:', error.message);
+    res.status(500).json({ erro: 'Erro ao falar com o Jarbas', detalhe: error.message });
   }
+});
 
-  rl.prompt();
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`API Jarbas rodando na porta ${PORT}`);
 });

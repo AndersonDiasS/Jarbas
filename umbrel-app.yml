@@ -5,10 +5,13 @@ description: Assistente pessoal local com IA com Ollama e MQTT via Docker
 license: MIT
 repository: https://github.com/seuusuario/jarbas-app
 
+# 🧠 Essa linha permite que o Umbrel exiba a interface Web
+webui: http://localhost:3000
+
 services:
   jarbas:
     name: Jarbas
-    image: jarbas-app:latest   # ou "build" se preferir construir
+    image: jarbas-app:latest
     build:
       context: .
     container_name: jarbas
@@ -18,7 +21,7 @@ services:
       - memoria:/memoria
       - ./:/app
     ports:
-      - 11436:11434
+      - 3000:3000  # 👈 WebUI será servida aqui
     depends_on:
       - ollama
       - mqtt
