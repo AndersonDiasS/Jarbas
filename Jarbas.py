@@ -1,76 +1,138 @@
 import requests
 import json
+import time
+from modules import voz
 
 # --- CONFIGURAÇÃO ---
-# 1. Substitua esta linha pelo endereço IP do seu servidor Umbrel na sua rede local.
-#    Exemplo: UMBREL_IP = "192.168.1.50"
-UMBREL_IP = "192.168.0.30"
-
-# 2. Monta a URL completa para a API do Ollama que está rodando no servidor.
+UMBREL_IP = "192.168.0.250"
 OLLAMA_URL = f"http://{UMBREL_IP}:11434/api/generate"
-
-# 3. Define qual modelo de IA queremos usar (o que você baixou anteriormente).
-MODELO = "llama3:8b" 
+MODELO = "llama3:8b"
 
 def conversar_com_jarbas(prompt_usuario):
     """
-    Esta função é o coração do programa. Ela envia a sua pergunta (prompt)
-    para a IA no servidor e imprime a resposta recebida.
+    Envia a pergunta do usuário para a IA Ollama e usa o módulo 'voz'
+    para falar a resposta.
     """
     print("\nJarbas está pensando...")
-
+    
     try:
-        # Montamos o "pacote" de dados (payload) que a API do Ollama espera receber.
-        # É um dicionário Python que será convertido para o formato JSON.
         payload = {
             "model": MODELO,
             "prompt": prompt_usuario,
-            "stream": False  # "stream: False" significa que queremos a resposta completa de uma vez.
+            "stream": False
         }
-
-        # Usamos a biblioteca 'requests' para enviar uma requisição POST para a nossa URL.
-        # A requisição contém o nosso pacote de dados em formato JSON.
-        response = requests.post(OLLAMA_URL, data=json.dumps(payload))
         
-        # Esta linha verifica se a requisição foi bem-sucedida (ex: código 200 OK).
-        # Se ocorrer um erro de conexão, ela lançará uma exceção.
-        response.raise_for_status() 
-
-        # A resposta da API também é em JSON. Nós a convertemos de volta para um dicionário Python.
+        # Adicionar headers apropriados
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        
+        print(f"Enviando requisição para: {OLLAMA_URL}")
+        print(f"Payload: {json.dumps(payload, indent=2)}")
+        
+        # Adicionar timeout para evitar travamento
+        response = requests.post(
+            OLLAMA_URL, 
+            data=json.dumps(payload),
+            headers=headers,
+            timeout=30  # Timeout de 30 segundos
+        )
+        
+        print(f"Status da resposta: {response.status_code}")
+        
+        response.raise_for_status()
         response_data = response.json()
         
-        # Extraímos o texto da resposta que está dentro da chave "response".
-        resposta_final = response_data.get("response", "Desculpe, não recebi uma resposta válida.")
+        print(f"Resposta recebida: {response_data}")
         
-        # Imprimimos a resposta final formatada na tela.
-        print(f"\nJarbas: {resposta_final.strip()}")
+        resposta_em_texto = response_data.get("response", "Desculpe, não consegui pensar em uma resposta.")
+        
+        # Verificar se a resposta não está vazia
+        if not resposta_em_texto or resposta_em_texto.strip() == "":
+            resposta_em_texto = "Recebi uma resposta vazia do servidor."
+        
+        print(f"Texto para falar: {resposta_em_texto[:100]}...")  # Mostrar primeiros 100 chars
+        voz.falar(resposta_em_texto.strip())
+        
+    except requests.exceptions.Timeout:
+        erro_msg = "Timeout: O servidor demorou muito para responder."
+        print(f"\n--- ERRO DE TIMEOUT ---")
+        print(erro_msg)
+        voz.falar(erro_msg)
+        
+    except requests.exceptions.ConnectionError:
+        erro_msg = f"Erro de conexão: Não foi possível conectar ao servidor {OLLAMA_URL}"
+        print(f"\n--- ERRO DE CONEXÃO ---")
+        print(erro_msg)
+        voz.falar(erro_msg)
+        
+    except requests.exceptions.HTTPError as e:
+        erro_msg = f"Erro HTTP {response.status_code}: {str(e)}"
+        print(f"\n--- ERRO HTTP ---")
+        print(erro_msg)
+        print(f"Resposta do servidor: {response.text}")
+        voz.falar("Erro na comunicação com o servidor.")
+        
+    except json.JSONDecodeError:
+        erro_msg = "Erro ao decodificar a resposta JSON do servidor."
+        print(f"\n--- ERRO JSON ---")
+        print(erro_msg)
+        print(f"Resposta recebida: {response.text}")
+        voz.falar(erro_msg)
+        
+    except Exception as e:
+        erro_msg = f"Erro inesperado: {str(e)}"
+        print(f"\n--- ERRO GERAL ---")
+        print(erro_msg)
+        voz.falar("Ocorreu um erro inesperado.")
 
-    except requests.exceptions.RequestException as e:
-        # Este bloco 'except' captura erros de conexão (ex: IP errado, servidor offline).
-        print("\n--- ERRO DE CONEXÃO ---")
-        print(f"Não foi possível conectar ao servidor Ollama em {OLLAMA_URL}")
-        print("Por favor, verifique se:")
-        print("1. O endereço IP está correto.")
-        print("2. O seu servidor Umbrel está ligado e conectado à rede.")
-        print("3. O serviço do Ollama está rodando corretamente no servidor.")
-        print(f"Detalhes técnicos do erro: {e}")
+def testar_conexao():
+    """
+    Testa se o servidor Ollama está respondendo
+    """
+    try:
+        print(f"Testando conexão com {OLLAMA_URL}...")
+        response = requests.get(f"http://{UMBREL_IP}:11434/api/tags", timeout=5)
+        if response.status_code == 200:
+            print("✓ Servidor Ollama está online")
+            return True
+        else:
+            print(f"✗ Servidor retornou status {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"✗ Erro ao testar conexão: {e}")
+        return False
 
 # --- LOOP PRINCIPAL ---
-# O código dentro deste 'if' só roda quando você executa o arquivo diretamente.
 if __name__ == "__main__":
-    print("--- Cliente Jarbas v1.0 ---")
-    print(f"Conectando ao servidor: {UMBREL_IP}")
-    print("Digite sua mensagem ou 'sair' para terminar.")
+    print("--- Cliente Jarbas ---")
+    print(f"Servidor: {UMBREL_IP}")
     
-    # Este loop infinito mantém o chat funcionando até você digitar 'sair'.
+    # Testar conexão antes de iniciar
+    if not testar_conexao():
+        print("AVISO: Não foi possível conectar ao servidor Ollama")
+        print("Continuando mesmo assim...")
+    
+    voz.falar("Jarbas online. Pronto para receber seus comandos.")
+    
     while True:
-        # Pede para o usuário digitar uma mensagem.
-        prompt = input("\nVocê: ")
-        
-        # Se o usuário digitar 'sair', o loop é interrompido e o programa termina.
-        if prompt.lower() == 'sair':
-            print("\nJarbas: Desconectando. Até a próxima.")
+        try:
+            prompt = input("\nVocê: ")
+            
+            if prompt.lower() in ['sair', 'quit', 'exit']:
+                voz.falar("Desconectando.")
+                break
+            
+            if prompt.strip() == "":
+                print("Digite algo ou 'sair' para encerrar.")
+                continue
+                
+            conversar_com_jarbas(prompt)
+            
+        except KeyboardInterrupt:
+            print("\n\nInterrompido pelo usuário.")
+            voz.falar("Desconectando.")
             break
-        
-        # Se não for 'sair', a função principal é chamada para processar a mensagem.
-        conversar_com_jarbas(prompt)
+        except Exception as e:
+            print(f"Erro no loop principal: {e}")
+            continue
