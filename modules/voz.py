@@ -3,139 +3,61 @@ import subprocess
 import os
 import time
 import threading
+import warnings
+import tempfile
 from urllib.parse import quote
+
+# Suprimir warnings
+warnings.filterwarnings("ignore")
 
 # CONFIGURAÇÃO
 UMBREL_IP = "192.168.0.250"
-PIPER_URL = f"http://{UMBREL_IP}:8888/api/tts"
+PIPER_URL = f"http://{UMBREL_IP}:5000/api/tts"
 
-# Cache para evitar requisições repetidas
-_audio_cache = {}
+# Cache e controle
+_servidor_funcionando = None
 
-def limpar_cache():
-    """Limpa arquivos de áudio antigos"""
+def verificar_servidor():
+    """Verificação rápida do servidor"""
+    global _servidor_funcionando
+    
+    if _servidor_funcionando is not None:
+        return _servidor_funcionando
+    
     try:
-        for filename in os.listdir('.'):
-            if filename.startswith('temp_audio_') and filename.endswith('.wav'):
-                file_age = time.time() - os.path.getmtime(filename)
-                if file_age > 300:  # 5 minutos
-                    os.remove(filename)
+        response = requests.get(f"http://{UMBREL_IP}:5000", timeout=2)
+        _servidor_funcionando = True
+        return True
     except:
-        pass
+        _servidor_funcionando = False
+        return False
 
-def falar_com_retry(texto, max_tentativas=3):
-    """Tenta falar com retry automático"""
+def falar_servidor_remoto(texto):
+    """TTS remoto"""
+    if not verificar_servidor():
+        return False
     
-    for tentativa in range(1, max_tentativas + 1):
-        print(f"\nTentativa {tentativa}/{max_tentativas} - Jarbas: {texto}")
-        
-        try:
-            # Limitar tamanho do texto
-            if len(texto) > 500:
-                texto = texto[:500] + "..."
-                print("Texto truncado por ser muito longo")
-            
-            # Verificar cache
-            texto_hash = hash(texto)
-            if texto_hash in _audio_cache:
-                audio_filename = _audio_cache[texto_hash]
-                if os.path.exists(audio_filename):
-                    print("Usando áudio do cache...")
-                    tocar_audio(audio_filename)
-                    return True
-            
-            # Preparar requisição
-            params = {'text': texto}
-            
-            # Timeout progressivo: 15s, 30s, 45s
-            timeout_val = 15 * tentativa
-            print(f"Enviando para TTS (timeout: {timeout_val}s)...")
-            
-            # Requisição com timeout
-            response = requests.get(
-                PIPER_URL, 
-                params=params, 
-                timeout=timeout_val,
-                stream=True  # Para detectar problemas mais cedo
-            )
-            
-            response.raise_for_status()
-            
-            # Verificar se recebeu conteúdo
-            if 'content-length' in response.headers:
-                expected_size = int(response.headers['content-length'])
-                print(f"Esperando {expected_size} bytes...")
-            
-            # Baixar conteúdo
-            audio_content = b''
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    audio_content += chunk
-            
-            if len(audio_content) == 0:
-                raise Exception("Resposta vazia do servidor TTS")
-            
-            print(f"Áudio recebido: {len(audio_content)} bytes")
-            
-            # Salvar arquivo
-            timestamp = int(time.time())
-            audio_filename = f"temp_audio_{timestamp}.wav"
-            
-            with open(audio_filename, "wb") as f:
-                f.write(audio_content)
-            
-            # Adicionar ao cache
-            _audio_cache[texto_hash] = audio_filename
-            
-            # Tocar áudio
-            tocar_audio(audio_filename)
-            
-            print(f"✓ Sucesso na tentativa {tentativa}")
-            return True
-            
-        except requests.exceptions.Timeout:
-            print(f"✗ Timeout na tentativa {tentativa} ({timeout_val}s)")
-            if tentativa == max_tentativas:
-                print("--- FALHA FINAL: TTS não respondeu em tempo hábil ---")
-                return False
-            else:
-                print(f"Aguardando {tentativa * 2}s antes da próxima tentativa...")
-                time.sleep(tentativa * 2)
-                
-        except requests.exceptions.ConnectionError:
-            print(f"✗ Erro de conexão na tentativa {tentativa}")
-            if tentativa == max_tentativas:
-                print("--- FALHA FINAL: Não foi possível conectar ao TTS ---")
-                return False
-            else:
-                time.sleep(tentativa * 2)
-                
-        except Exception as e:
-            print(f"✗ Erro na tentativa {tentativa}: {e}")
-            if tentativa == max_tentativas:
-                print("--- FALHA FINAL: Erro no processamento TTS ---")
-                return False
-            else:
-                time.sleep(tentativa)
-    
-    return False
-
-def tocar_audio(audio_filename):
-    """Toca o arquivo de áudio"""
     try:
-        if not os.path.exists(audio_filename):
-            print(f"Arquivo {audio_filename} não encontrado")
-            return False
-            
-        file_size = os.path.getsize(audio_filename)
-        if file_size == 0:
-            print(f"Arquivo {audio_filename} está vazio")
-            return False
-            
-        print(f"Tocando {audio_filename} ({file_size} bytes)...")
+        if len(texto) > 200:
+            texto = texto[:200] + "..."
         
-        # Usar Popen para não travar
-        process = subprocess.Popen(
+        params = {'text': texto}
+        response = requests.get(PIPER_URL, params=params, timeout=10)
+        
+        if response.status_code != 200:
+            return False
+        
+        audio_content = response.content
+        if len(audio_content) == 0:
+            return False
+        
+        timestamp = int(time.time())
+        audio_filename = f"temp_audio_{timestamp}.wav"
+        
+        with open(audio_filename, "wb") as f:
+            f.write(audio_content)
+        
+        subprocess.Popen(
             ["aplay", audio_filename],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
@@ -143,67 +65,193 @@ def tocar_audio(audio_filename):
         
         return True
         
-    except FileNotFoundError:
-        print("ERRO: 'aplay' não encontrado. Instale com: sudo apt install alsa-utils")
+    except:
+        global _servidor_funcionando
+        _servidor_funcionando = False
+        return False
+
+def falar_google_tts(texto):
+    """Google TTS - VOZ MASCULINA NATURAL"""
+    try:
+        from gtts import gTTS
+        import pygame
+        import io
+        
+        # Tentar diferentes configurações para voz masculina
+        configuracoes_voz = [
+            # Português europeu (mais grave e formal)
+            {'lang': 'pt', 'slow': False, 'freq': 20000},
+            # Português brasileiro com frequência reduzida
+            {'lang': 'pt-br', 'slow': False, 'freq': 18000},
+            # Português brasileiro normal como fallback
+            {'lang': 'pt-br', 'slow': False, 'freq': 22050}
+        ]
+        
+        for config in configuracoes_voz:
+            try:
+                # Criar TTS
+                tts = gTTS(text=texto, lang=config['lang'], slow=config['slow'])
+                
+                # Salvar em buffer
+                audio_buffer = io.BytesIO()
+                tts.write_to_fp(audio_buffer)
+                audio_buffer.seek(0)
+                
+                # Inicializar mixer com frequência ajustada para tom mais grave
+                pygame.mixer.init(frequency=config['freq'])
+                
+                # Tocar áudio
+                pygame.mixer.music.load(audio_buffer)
+                pygame.mixer.music.play()
+                
+                # Aguardar terminar
+                while pygame.mixer.music.get_busy():
+                    time.sleep(0.1)
+                
+                pygame.mixer.quit()
+                return True
+                
+            except Exception:
+                # Se esta configuração falhar, tentar a próxima
+                try:
+                    pygame.mixer.quit()
+                except:
+                    pass
+                continue
+        
+        return False
+        
+    except ImportError:
         return False
     except Exception as e:
-        print(f"Erro ao tocar áudio: {e}")
         return False
 
-def falar_async(texto):
-    """Fala em thread separada para não bloquear"""
-    def _falar():
-        falar_com_retry(texto)
-    
-    thread = threading.Thread(target=_falar, daemon=True)
-    thread.start()
-    return thread
-
-def falar(texto):
-    """Função principal - compatível com código existente"""
-    # Limpar cache periodicamente
-    if len(_audio_cache) > 10:
-        limpar_cache()
-    
-    # Verificar se TTS está disponível rapidamente
-    if not verificar_tts_rapido():
-        print(f"\nJarbas (só texto): {texto}")
-        print("--- TTS indisponível ---")
-        return False
-    
-    # Tentar falar com retry
-    return falar_com_retry(texto)
-
-def verificar_tts_rapido():
-    """Verificação rápida se TTS está respondendo"""
+def falar_espeak_melhorado(texto):
+    """Espeak com VOZ MASCULINA otimizada"""
     try:
-        response = requests.get(
-            f"http://{UMBREL_IP}:8888", 
-            timeout=3
-        )
-        return response.status_code in [200, 404]  # 404 também indica que servidor está vivo
+        # Configurações priorizando VOZES MASCULINAS
+        configuracoes = [
+            # Voz masculina brasileira grave
+            ["espeak", "-v", "pt-br+m3", "-s", "160", "-p", "30", "-a", "100", "-g", "5", texto],
+            # Voz masculina brasileira normal
+            ["espeak", "-v", "pt-br+m1", "-s", "160", "-p", "35", "-a", "100", "-g", "3", texto],
+            # Português genérico masculino
+            ["espeak", "-v", "pt+m3", "-s", "160", "-p", "30", "-a", "100", texto],
+            # Voz masculina genérica
+            ["espeak", "-v", "m1", "-s", "150", "-p", "30", texto],
+            # Fallback sem voz específica
+            ["espeak", "-s", "150", "-p", "35", texto]
+        ]
+        
+        for cmd in configuracoes:
+            try:
+                subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=True
+                )
+                return True
+            except:
+                continue
+                
+        return False
+        
     except:
         return False
 
-def teste_tts():
-    """Função para testar o TTS"""
-    print("=== TESTE DO MÓDULO TTS ===")
+def falar_pyttsx3_melhorado(texto):
+    """pyttsx3 com VOZ MASCULINA otimizada"""
+    try:
+        import pyttsx3
+        import io
+        from contextlib import redirect_stderr
+        
+        with redirect_stderr(io.StringIO()):
+            engine = pyttsx3.init()
+            
+            # Configurar voz MASCULINA se disponível
+            voices = engine.getProperty('voices')
+            if voices:
+                # Primeiro: procurar vozes explicitamente masculinas
+                for voice in voices:
+                    if voice and hasattr(voice, 'name'):
+                        name_lower = voice.name.lower()
+                        if any(term in name_lower for term in [
+                            'male', 'man', 'masculin', 'joão', 'carlos', 'paulo'
+                        ]):
+                            engine.setProperty('voice', voice.id)
+                            break
+                else:
+                    # Se não encontrar masculina específica, usar qualquer pt/br
+                    for voice in voices:
+                        if voice and hasattr(voice, 'name'):
+                            name_lower = voice.name.lower()
+                            if any(term in name_lower for term in ['pt', 'brazil', 'portuguese']):
+                                engine.setProperty('voice', voice.id)
+                                break
+            
+            # Configurações para voz mais grave/masculina
+            engine.setProperty('rate', 160)      # Velocidade um pouco mais lenta
+            engine.setProperty('volume', 1.0)    # Volume máximo
+            
+            engine.say(texto)
+            engine.runAndWait()
+            engine.stop()
+        
+        return True
+        
+    except:
+        return False
+
+def falar(texto):
+    """Função principal com fallback inteligente"""
     
-    textos_teste = [
-        "teste rápido",
-        "este é um teste um pouco mais longo para verificar se funciona bem",
-        "ção ão ãe caracteres especiais"
+    # Limitar texto muito longo
+    if len(texto) > 300:
+        texto = texto[:300] + "..."
+    
+    print("🔊", end=" ", flush=True)  # Indicador visual discreto
+    
+    # 1. Tentar servidor remoto (mais rápido quando funciona)
+    if falar_servidor_remoto(texto):
+        return True
+    
+    # 2. Google TTS (MELHOR qualidade)
+    if falar_google_tts(texto):
+        return True
+    
+    # 3. Espeak melhorado
+    if falar_espeak_melhorado(texto):
+        return True
+    
+    # 4. pyttsx3 melhorado (último recurso)
+    if falar_pyttsx3_melhorado(texto):
+        return True
+    
+    # 5. Falha total
+    print("❌ TTS indisponível")
+    return False
+
+def falar_async(texto):
+    """Versão assíncrona"""
+    thread = threading.Thread(target=falar, args=(texto,), daemon=True)
+    thread.start()
+    return thread
+
+def teste_completo():
+    """Teste das vozes"""
+    print("🧪 Testando vozes disponíveis...")
+    
+    textos = [
+        "Olá, eu sou o Jarbas",
+        "Esta é minha nova voz melhorada"
     ]
     
-    for i, texto in enumerate(textos_teste, 1):
-        print(f"\nTeste {i}: '{texto}'")
-        sucesso = falar(texto)
-        if sucesso:
-            print("✓ Sucesso")
-        else:
-            print("✗ Falhou")
-        
-        time.sleep(2)  # Pausa entre testes
+    for texto in textos:
+        print(f"Testando: {texto}")
+        falar(texto)
+        time.sleep(2)
 
 if __name__ == "__main__":
-    teste_tts()
+    teste_completo()
